@@ -1,0 +1,130 @@
+name: deploy-model
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: deploy or rollback
+        required: false
+        default: deploy
+        type: choice
+        options: [deploy, rollback]
+      environment:
+        description: target environment
+        required: false
+        default: production
+        type: string
+
+concurrency:
+  group: deploy-model-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_URI: ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint OpenAPI (redocly)
+        run: npx @redocly/cli lint api/openapi.yaml
+      - name: Lint Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: container/Dockerfile
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: ./scripts/test-unit.sh
+      - name: Contract tests
+        run: ./scripts/test-contract.sh
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t "$IMAGE_URI" -f container/Dockerfile .
+
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image for scan
+        run: docker build -t "$IMAGE_URI" -f container/Dockerfile .
+      - name: Trivy scan (fail on HIGH,CRITICAL)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.IMAGE_URI }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
+  push:
+    needs: scan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          docker build -t "$IMAGE_URI" -f container/Dockerfile .
+          docker push "$IMAGE_URI"
+
+  deploy-staging:
+    needs: push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to staging
+        run: ./scripts/deploy.sh staging "$IMAGE_URI"
+
+  smoke-staging:
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke test staging
+        run: ./scripts/smoke.sh staging
+
+  deploy-production:
+    needs: smoke-staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rollback (manual dispatch)
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'rollback'
+        run: ./scripts/rollback.sh production
+      - name: Canary deploy 10%
+        if: github.event_name != 'workflow_dispatch' || inputs.action == 'deploy'
+        run: ./scripts/deploy.sh production "$IMAGE_URI" --canary 10
+      - name: Verify canary
+        if: github.event_name != 'workflow_dispatch' || inputs.action == 'deploy'
+        run: ./scripts/canary-verify.sh production
+      - name: Full rollout
+        if: github.event_name != 'workflow_dispatch' || inputs.action == 'deploy'
+        run: ./scripts/deploy.sh production "$IMAGE_URI" --full

@@ -1,0 +1,11 @@
+{
+  "user_id": "u_8821",
+  "session_id": "s_5f0c1a",
+  "context": {
+    "locale": "en-US",
+    "platform": "ios",
+    "entry_point": "home_screen",
+    "recent_categories": ["footwear", "outdoor"]
+  },
+  "top_k": 20
+}

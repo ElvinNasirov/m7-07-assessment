@@ -1,0 +1,141 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: retail-recommendations-alerts
+  labels:
+    service: retail-recommendations
+spec:
+  groups:
+    - name: retail-recommendations.slo
+      rules:
+        # Fast availability burn -> page. 14.4x over 1h (with 5m short window).
+        - alert: AvailabilityBurnFast
+          expr: |
+            (
+              sum(rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations",code=~"5.."}[1h]))
+              / sum(rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations"}[1h]))
+            ) > (14.4 * 0.003)
+            and
+            (
+              sum(rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations",code=~"5.."}[5m]))
+              / sum(rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations"}[5m]))
+            ) > (14.4 * 0.003)
+          for: 2m
+          labels:
+            severity: page
+            service: retail-recommendations
+          annotations:
+            summary: "Fast availability error-budget burn"
+            description: "5xx burn rate >14.4x the 99.7% SLO budget over 1h. Availability burn page -> consider rollback."
+            runbook_url: "https://github.com/<repo>/blob/main/runbooks/rollback.md"
+
+        # Slow availability burn -> ticket. 6x over 6h (with 30m short window).
+        - alert: AvailabilityBurnSlow
+          expr: |
+            (
+              sum(rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations",code=~"5.."}[6h]))
+              / sum(rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations"}[6h]))
+            ) > (6 * 0.003)
+            and
+            (
+              sum(rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations",code=~"5.."}[30m]))
+              / sum(rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations"}[30m]))
+            ) > (6 * 0.003)
+          for: 15m
+          labels:
+            severity: ticket
+            service: retail-recommendations
+          annotations:
+            summary: "Slow availability error-budget burn"
+            description: "5xx burn rate >6x the 99.7% SLO budget over 6h. Investigate before it becomes a page."
+            runbook_url: "https://github.com/<repo>/blob/main/runbooks/rollback.md"
+
+    - name: retail-recommendations.latency
+      rules:
+        - alert: LatencyP95High
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_ms_bucket{service="retail-recommendations",route="/v1/recommendations",code="200"}[5m])) by (le)
+            ) > 120
+          for: 10m
+          labels:
+            severity: ticket
+            service: retail-recommendations
+          annotations:
+            summary: "p95 latency over 120 ms budget"
+            description: "Sync p95 has exceeded the 120 ms budget for 10m. Check ranker/feature/candidate stages."
+            runbook_url: "https://github.com/<repo>/blob/main/runbooks/rollback.md"
+
+        # Matches rollback trigger: p95 > 250 ms for 15 min.
+        - alert: LatencyP99High
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_ms_bucket{service="retail-recommendations",route="/v1/recommendations",code="200"}[5m])) by (le)
+            ) > 250
+          for: 15m
+          labels:
+            severity: page
+            service: retail-recommendations
+          annotations:
+            summary: "Latency far over budget (p95 > 250 ms)"
+            description: "Sync p95 > 250 ms for 15m, breaching the p99 250 ms guardrail. Rollback trigger."
+            runbook_url: "https://github.com/<repo>/blob/main/runbooks/rollback.md"
+
+    - name: retail-recommendations.quality
+      rules:
+        - alert: FeatureFreshnessStale
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(feature_snapshot_age_minutes_bucket{service="retail-recommendations"}[10m])) by (le)
+            ) > 15
+          for: 10m
+          labels:
+            severity: ticket
+            service: retail-recommendations
+          annotations:
+            summary: "Feature snapshots older than 15 minutes"
+            description: "p99 feature snapshot age > 15m, breaching recommendation_freshness SLO. Feature freshness breach -> see runbook."
+            runbook_url: "https://github.com/<repo>/blob/main/runbooks/rollback.md"
+
+        - alert: DriftDetected
+          expr: |
+            max(feature_drift_psi{service="retail-recommendations"}) > 0.2
+          for: 30m
+          labels:
+            severity: ticket
+            service: retail-recommendations
+          annotations:
+            summary: "Input feature drift detected"
+            description: "Population Stability Index > 0.2 for 30m. Investigate data shift; consider retraining."
+            runbook_url: "https://github.com/<repo>/blob/main/runbooks/rollback.md"
+
+        # Compares served model_version vs expected registry production version.
+        - alert: ModelVersionMismatch
+          expr: |
+            sum by (model_version) (rate(http_requests_total{service="retail-recommendations",route="/v1/recommendations",code="200"}[5m]))
+            unless on (model_version)
+            registry_expected_model_version{service="retail-recommendations",stage="production"} == 1
+          for: 5m
+          labels:
+            severity: page
+            service: retail-recommendations
+          annotations:
+            summary: "Served model version differs from registry production version"
+            description: "A replica is serving an X-Model-Version not equal to the registry production version. Model version mismatch -> rollback trigger."
+            runbook_url: "https://github.com/<repo>/blob/main/runbooks/rollback.md"
+
+        # CTR/conversion guardrail regression from A/B analysis.
+        - alert: ABTestMetricRegression
+          expr: |
+            (
+              ab_test_conversion_rate{service="retail-recommendations",arm="treatment"}
+              - ab_test_conversion_rate{service="retail-recommendations",arm="control"}
+            ) < -0.01
+          for: 60m
+          labels:
+            severity: page
+            service: retail-recommendations
+          annotations:
+            summary: "A/B guardrail regression (CTR/conversion)"
+            description: "Treatment conversion is >1pp below control for 60m. CTR/conversion guardrail regression -> rollback trigger."
+            runbook_url: "https://github.com/<repo>/blob/main/runbooks/rollback.md"

@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "id": "row-001",
+      "request": {
+        "user_id": "u_8821",
+        "top_k": 10
+      }
+    },
+    {
+      "id": "row-002",
+      "request": {
+        "user_id": "cold_start",
+        "context": {
+          "locale": "de-DE",
+          "platform": "android"
+        },
+        "top_k": 10
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "request_id": "req_b7c4",
+  "model_version": "home-screen-ranker-2026.06.03-a1b2c3d",
+  "experiment_id": "exp_ranker_v3",
+  "results": {
+    "row-001": {
+      "request_id": "req_b7c4",
+      "model_version": "home-screen-ranker-2026.06.03-a1b2c3d",
+      "experiment_id": "exp_ranker_v3",
+      "fallback": false,
+      "items": [
+        { "product_id": "p_1001", "score": 0.91, "rank": 1 },
+        { "product_id": "p_2048", "score": 0.84, "rank": 2 }
+      ]
+    },
+    "row-002": {
+      "request_id": "req_b7c4",
+      "model_version": "home-screen-ranker-2026.06.03-a1b2c3d",
+      "experiment_id": "exp_ranker_v3",
+      "fallback": true,
+      "items": [
+        { "product_id": "p_5500", "score": 0.55, "rank": 1 },
+        { "product_id": "p_5510", "score": 0.52, "rank": 2 }
+      ]
+    }
+  }
+}

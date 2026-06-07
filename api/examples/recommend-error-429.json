@@ -1,0 +1,5 @@
+{
+  "code": "rate_limited",
+  "message": "Too many requests. Retry after the indicated delay.",
+  "request_id": "req_429abc"
+}

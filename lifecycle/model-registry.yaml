@@ -1,0 +1,60 @@
+registry:
+  name: retail-recs-models
+  description: >-
+    Registry for the Scenario X home-screen recommendation ranker. Tracks model
+    versions, promotion gates, approvals, and lineage. Production is the source
+    of truth for the X-Model-Version served online.
+
+stages:
+  - name: staging
+    description: Candidate versions under evaluation and canary.
+  - name: production
+    description: Single active version serving live traffic.
+  - name: archived
+    description: Retired versions; retained as rollback targets and for audit.
+
+promotion_gates:
+  staging_to_production:
+    - id: offline_quality
+      metric: ndcg_at_10
+      rule: ">= baseline + 0.02"           # +2% absolute over current production baseline
+    - id: latency_simulation
+      metric: p95_latency_ms
+      rule: "<= 120"                         # matches serving p95 budget
+    - id: cold_start_guardrail
+      metric: cold_start_ctr_proxy
+      rule: ">= baseline - 0.01"             # not worse than baseline by more than 1%
+    - id: schema_validation
+      metric: feature_schema_check
+      rule: "passes"
+    - id: canary
+      metric: canary_success
+      rule: "passes"                         # 10% canary verified, no guardrail regression
+
+approvals:
+  production:
+    type: manual
+    required_approvers:
+      - role: ML Lead
+      - role: Product Owner
+      - role: Platform Owner
+    policy: all_required                      # all three must approve before production
+
+models:
+  - name: home-screen-ranker
+    task: ranking
+    framework: onnx
+    artifact_path: /app/models/ranker.onnx
+    serving_image_tag_scheme: "ghcr.io/<repo>:<git-sha>"
+    served_version_header: X-Model-Version
+    rollback_target: previous_successful_production_version
+
+lineage_fields:
+  - git_sha
+  - dataset_hash
+  - feature_schema_version
+  - training_image_digest
+  - run_id
+  - random_seed
+  - model_uri
+  - evaluation_report_uri

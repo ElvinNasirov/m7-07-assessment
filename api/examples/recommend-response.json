@@ -1,0 +1,11 @@
+{
+  "request_id": "req_9f2b",
+  "model_version": "home-screen-ranker-2026.06.03-a1b2c3d",
+  "experiment_id": "exp_ranker_v3",
+  "fallback": false,
+  "items": [
+    { "product_id": "p_1001", "score": 0.92, "rank": 1 },
+    { "product_id": "p_2048", "score": 0.88, "rank": 2 },
+    { "product_id": "p_3090", "score": 0.81, "rank": 3 }
+  ]
+}

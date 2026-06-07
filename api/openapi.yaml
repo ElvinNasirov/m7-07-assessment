@@ -1,0 +1,497 @@
+openapi: 3.1.0
+info:
+  title: Retail Recommendations API
+  version: 1.0.0
+  description: >-
+    Personalized in-app product recommendations for the B2C retail mobile app
+    (Scenario X). The main path is synchronous /v1/recommendations. Batch and
+    async endpoints support partner/internal jobs, not the live home-screen path.
+  contact:
+    name: ML Platform
+    email: ml-platform@retail.example
+
+servers:
+  - url: https://api.retail.example
+    description: Production
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: recommendations
+    description: Ranking endpoints
+
+paths:
+  /v1/recommendations:
+    post:
+      tags: [recommendations]
+      operationId: getRecommendations
+      summary: Synchronous personalized recommendations (home-screen path)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/RecommendRequestExample'
+      responses:
+        '200':
+          description: Ranked recommendations.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Model-Version:
+              $ref: '#/components/headers/X-Model-Version'
+            X-Experiment-ID:
+              $ref: '#/components/headers/X-Experiment-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/recommendations-batch:
+    post:
+      tags: [recommendations]
+      operationId: getRecommendationsBatch
+      summary: Synchronous batch ranking for partner/internal jobs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/BatchRequestExample'
+      responses:
+        '200':
+          description: Per-item results keyed by caller-supplied id.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Model-Version:
+              $ref: '#/components/headers/X-Model-Version'
+            X-Experiment-ID:
+              $ref: '#/components/headers/X-Experiment-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/recommendations-async:
+    post:
+      tags: [recommendations]
+      operationId: submitRecommendationsAsync
+      summary: Submit a large async ranking job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+            examples:
+              default:
+                $ref: '#/components/examples/BatchRequestExample'
+      responses:
+        '202':
+          description: Job accepted for asynchronous processing.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncSubmitResponse'
+              examples:
+                default:
+                  $ref: '#/components/examples/AsyncSubmitResponseExample'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/recommendations/{job_id}:
+    get:
+      tags: [recommendations]
+      operationId: getAsyncRecommendations
+      summary: Poll an async job and fetch its result
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          description: Identifier returned by /v1/recommendations-async.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current job state; results present when state is done.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            X-Model-Version:
+              $ref: '#/components/headers/X-Model-Version'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncResult'
+              examples:
+                done:
+                  $ref: '#/components/examples/AsyncResultDoneExample'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  headers:
+    X-Request-ID:
+      description: Correlation id echoed on every response.
+      required: true
+      schema:
+        type: string
+    X-Model-Version:
+      description: Version of the served ranking model.
+      required: true
+      schema:
+        type: string
+    X-Experiment-ID:
+      description: A/B experiment assignment for this response.
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    RecommendRequest:
+      type: object
+      required: [user_id]
+      additionalProperties: false
+      properties:
+        user_id:
+          type: string
+          description: Stable user identifier. Use a cold-start placeholder if unknown.
+        session_id:
+          type: string
+          description: Current app session id for session-aware ranking.
+        context:
+          $ref: '#/components/schemas/Context'
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+          description: Number of recommendations to return.
+
+    Context:
+      type: object
+      additionalProperties: false
+      description: First-session and request context, used for cold-start and personalization.
+      properties:
+        locale:
+          type: string
+          example: en-US
+        platform:
+          type: string
+          enum: [ios, android]
+        entry_point:
+          type: string
+          example: home_screen
+        recent_categories:
+          type: array
+          items:
+            type: string
+
+    RecommendResponse:
+      type: object
+      required: [request_id, model_version, items]
+      additionalProperties: false
+      properties:
+        request_id:
+          type: string
+        model_version:
+          type: string
+        experiment_id:
+          type: string
+        fallback:
+          type: boolean
+          default: false
+          description: True when results came from the cold-start/degraded fallback.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendationItem'
+
+    RecommendationItem:
+      type: object
+      required: [product_id, score, rank]
+      additionalProperties: false
+      properties:
+        product_id:
+          type: string
+        score:
+          type: number
+          format: float
+        rank:
+          type: integer
+          minimum: 1
+
+    BatchRequest:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [id, request]
+            additionalProperties: false
+            properties:
+              id:
+                type: string
+                description: Caller-supplied id; response is keyed by this value.
+              request:
+                $ref: '#/components/schemas/RecommendRequest'
+
+    BatchResponse:
+      type: object
+      required: [request_id, model_version, results]
+      additionalProperties: false
+      properties:
+        request_id:
+          type: string
+        model_version:
+          type: string
+        experiment_id:
+          type: string
+        results:
+          type: object
+          description: Map of caller-supplied id to its recommendation result.
+          additionalProperties:
+            $ref: '#/components/schemas/RecommendResponse'
+
+    AsyncSubmitResponse:
+      type: object
+      required: [job_id, state]
+      additionalProperties: false
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/JobState'
+        poll_url:
+          type: string
+          format: uri
+
+    AsyncResult:
+      type: object
+      required: [job_id, state]
+      additionalProperties: false
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/JobState'
+        model_version:
+          type: string
+        submitted_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        result:
+          $ref: '#/components/schemas/BatchResponse'
+        error:
+          $ref: '#/components/schemas/Error'
+
+    JobState:
+      type: string
+      enum: [queued, running, done, failed, expired]
+
+    Error:
+      type: object
+      required: [code, message, request_id]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Malformed request.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid API key.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLarge:
+      description: Request body exceeds limits.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnprocessableEntity:
+      description: Request is well-formed but fails validation.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            default:
+              $ref: '#/components/examples/Error429Example'
+    ServiceUnavailable:
+      description: Dependency degraded or capacity exhausted.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/X-Request-ID'
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  examples:
+    RecommendRequestExample:
+      summary: Returning user home-screen request
+      value:
+        user_id: u_8821
+        session_id: s_5f0c1a
+        context:
+          locale: en-US
+          platform: ios
+          entry_point: home_screen
+          recent_categories: [footwear, outdoor]
+        top_k: 20
+    BatchRequestExample:
+      summary: Two-item batch keyed by caller id
+      value:
+        items:
+          - id: row-001
+            request:
+              user_id: u_8821
+              top_k: 10
+          - id: row-002
+            request:
+              user_id: cold_start
+              context:
+                locale: de-DE
+                platform: android
+              top_k: 10
+    AsyncSubmitResponseExample:
+      summary: Accepted async job
+      value:
+        job_id: 7c1f6c3e-2b6d-4a44-9b0e-2d3f9a1c0b55
+        state: queued
+        poll_url: /v1/recommendations/7c1f6c3e-2b6d-4a44-9b0e-2d3f9a1c0b55
+    AsyncResultDoneExample:
+      summary: Completed async job
+      value:
+        job_id: 7c1f6c3e-2b6d-4a44-9b0e-2d3f9a1c0b55
+        state: done
+        model_version: home-screen-ranker-2026.06.03-a1b2c3d
+        submitted_at: "2026-06-08T00:00:00Z"
+        completed_at: "2026-06-08T00:00:07Z"
+        result:
+          request_id: req_9f2b
+          model_version: home-screen-ranker-2026.06.03-a1b2c3d
+          experiment_id: exp_ranker_v3
+          results:
+            row-001:
+              request_id: req_9f2b
+              model_version: home-screen-ranker-2026.06.03-a1b2c3d
+              experiment_id: exp_ranker_v3
+              fallback: false
+              items:
+                - product_id: p_1001
+                  score: 0.92
+                  rank: 1
+    Error429Example:
+      summary: Rate limited
+      value:
+        code: rate_limited
+        message: Too many requests. Retry after the indicated delay.
+        request_id: req_429abc
